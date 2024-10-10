@@ -1,19 +1,15 @@
-type Job = () => any;
-type JobResult = JobSuccess | JobFailure;
-type JobSuccess = { status: 'success'; result: any };
-type JobFailure = { status: 'failure'; error: Error };
-type BatchProcessor = (jobs: Job[]) => Promise<JobResult[]>;
+type Job<T> = () => T;
+export type BatchProcessor<T> = (jobs: Job<T>[]) => Promise<T[]>;
 
-class MicroBatcher {
-  private batchSize: number
-  private batchFrequency: number
-  private batchProcessor: BatchProcessor
-  private jobQueue:  { job: Job; resolve: (result: JobResult) => void; reject: (error: Error) => void }[] = []
-  private intervalId: number;
-
+export class MicroBatcher<T> {
+  private readonly batchSize: number;
+  private readonly batchFrequency: number;
+  private readonly batchProcessor: BatchProcessor<T>;
+  private jobQueue: { job: Job<T>; resolve: (result: T) => void; }[] = [];
+  private intervalId: NodeJS.Timeout | undefined;
 
   constructor(
-    processor: BatchProcessor,
+    processor: BatchProcessor<T>,
     batchSize: number,
     batchFrequency: number
   ) {
@@ -21,44 +17,52 @@ class MicroBatcher {
     this.batchSize = batchSize;
     this.batchFrequency = batchFrequency;
 
-    this.intervalId = setInterval(() => this.processBatch(), this.batchFrequency);
+    this.startInterval()
   }
 
-  public async submitJob(job: Job): Promise<JobResult> {
-    return new Promise((resolve, reject) => {
-      this.jobQueue.push({ job, resolve, reject });
-
-      if (this.jobQueue.length >= this.batchSize) {
+  private async startInterval(): Promise<void> {
+    this.intervalId = setInterval(() => {
+      if (this.jobQueue.length > 0) {
         this.processBatch();
       }
+    }, this.batchFrequency)
+  }
+
+  private async triggerInstantBatch(): Promise<T[]> {
+    if (this.jobQueue.length > 0) {
+      // Stop the interval to prevent multiple batches running at the same time
+      clearInterval(this.intervalId);
+      const results = await this.processBatch()
+      this.startInterval()
+      return results
+    }
+    return []
+  }
+
+  private async processBatch(): Promise<T[]> {
+    const jobsToProcess = this.jobQueue.splice(0, this.batchSize);
+    const jobResults = await this.batchProcessor(jobsToProcess.map(({job}) => job));
+
+    jobResults.forEach((jobResult, i) => {
+      const {resolve} = jobsToProcess[i];
+      resolve(jobResult);
     });
-
+    return jobResults;
   }
 
-  public async shutdown(): Promise<void> {
+  public async submitJob(job: Job<T>): Promise<T> {
+    return new Promise(async (resolve) => {
+      this.jobQueue.push({job, resolve});
+
+      if (this.jobQueue.length >= this.batchSize) {
+        this.triggerInstantBatch()
+      }
+    });
+  }
+
+  public async shutdown(): Promise<T[]> {
     clearInterval(this.intervalId);
-    while (this.jobQueue.length > 0) {
-      await this.processBatch();
-    }
-  }
-
-  private async processBatch(): Promise<void> {
-    if (this.jobQueue.length === 0) return;
-
-    const jobsToProcess = this.jobQueue.splice(0, this.batchSize)
-    try {
-      const jobResults = await this.batchProcessor(jobsToProcess.map(({job}) => job))
-
-      jobResults.forEach((jobResult, i) => {
-        const {resolve, reject} = jobsToProcess[i]
-        if (jobResult.status === 'success') {
-          resolve(jobResult)
-        } else {
-          reject(jobResult.error)
-        }
-      })
-    } catch (error) {
-      jobsToProcess.forEach(({reject}) => reject(error))
-    }
+    if (this.jobQueue.length == 0) return []
+    return await this.processBatch()
   }
 }
