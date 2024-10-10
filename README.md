@@ -5,6 +5,7 @@
 - Frequency is a default interval that the batch processor runs on if there are job queues (e.g. every 1000 milliseconds)
 - When a job is submitted and job queue equals batch size (triggering an instant batch process), the frequency interval 
 batch processor is stopped and only started again after the batch processor finishes processing the job queue
+- When one job throws an error in batch processor, the entire batch will throw an error 
 
 ## How to run
 

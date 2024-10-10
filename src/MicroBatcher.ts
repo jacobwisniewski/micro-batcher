@@ -54,7 +54,7 @@ export class MicroBatcher<T> {
       return jobResults;
     } catch (error) {
       jobsToProcess.forEach(({reject}) => reject(error));
-      throw error;
+      return []
     }
   }
 

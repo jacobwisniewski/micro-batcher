@@ -107,4 +107,16 @@ describe("MicroBatcher", () => {
       })
     })
   })
+
+  describe("GIVEN a job that throws an error", () => {
+    it("SHOULD reject the job promise", async () => {
+      const microBatcher = new MicroBatcher(batchProcessor, 1, 1000);
+      const job = () => {
+        throw new Error("Job failed");
+      }
+
+      const result = microBatcher.submitJob(job)
+      await expect(result).rejects.toThrow("Job failed");
+    })
+  })
 })
